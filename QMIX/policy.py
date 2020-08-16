@@ -58,7 +58,7 @@ class QMIX:
 
     def learn(self, batch, max_episode_len, train_step, epsilon=None):
         """
-        batch: train data, obs: (batch_size, episode_limit, n_agents, obs_shape)
+        batch: train data, obs: (batch_size, episode_limit, n_agents, obs_shape),(64, -53- ,3,42)
         max_episode_len: max episode length
         train_step: step record for updating target network parameters 
         """
@@ -84,9 +84,11 @@ class QMIX:
         mask = mask.to(self.device)
 
         # 取每个agent动作对应的Q值，并且把最后不需要的一维去掉，因为最后一维只有一个值了
+        # print("q_evals1 shape: ", q_evals.size()) #[batch_size, max_episode_len, n_agents, n_actions]
         q_evals = torch.gather(q_evals, dim=3, index=u).squeeze(3)
         q_targets[avail_u_ == 0.0] = -9999999
         q_targets = q_targets.max(dim=3)[0]
+        # print("q_evals2 shape: ", q_evals.size()) # [batch_size, max_episode_len, n_agents]
         
         q_total_eval = self.eval_qmix_net(q_evals, s)
         q_total_target = self.target_qmix_net(q_targets, s_)
@@ -112,20 +114,21 @@ class QMIX:
         q_evals, q_targets = [], []
         for transition_idx in range(max_episode_len):
             inputs, inputs_ = self._get_inputs(batch, transition_idx) # 给obs加last_action、agent_id
-            inputs = inputs.to(self.device)
+            inputs = inputs.to(self.device)  # [batch_size*n_agents, obs_shape+n_agents+n_actions]
             inputs_ = inputs_.to(self.device)
+            
             self.eval_hidden = self.eval_hidden.to(self.device)
             self.target_hidden = self.target_hidden.to(self.device)
-            q_eval, self.eval_hidden = self.eval_drqn_net(inputs, self.eval_hidden)
+            q_eval, self.eval_hidden = self.eval_drqn_net(inputs, self.eval_hidden) # (n_agents, n_actions)
             q_target, self.target_hidden = self.target_drqn_net(inputs_, self.target_hidden)
 
-            q_eval = q_eval.view(episode_num, self.n_agents, -1)
+            q_eval = q_eval.view(episode_num, self.n_agents, -1) #(batch_size, n_agents, n_actions)
             q_target = q_target.view(episode_num, self.n_agents, -1)
             q_evals.append(q_eval)
             q_targets.append(q_target)
         
         # 得的q_eval和q_target是一个列表，列表里装着max_episode_len个数组，数组的的维度是(episode个数, n_agents，n_actions)
-        # 把该列表转化成(episode个数, max_episode_len， n_agents，n_actions)的数组
+        # 把该列表转化成(batch_size, max_episode_len， n_agents，n_actions)的数组
         q_evals = torch.stack(q_evals, dim=1)
         q_targets = torch.stack(q_targets, dim=1)
         return q_evals, q_targets
@@ -133,7 +136,7 @@ class QMIX:
 
     def _get_inputs(self, batch, transition_idx):
         o, o_, u_onehot = batch['o'][:, transition_idx], batch['o_'][:, transition_idx], batch['u_onehot'][:] # u_onehot取全部，要用上一条
-        episode_num = o.shape[0]
+        episode_num = o.shape[0] # batch_size
         inputs, inputs_ = [], []
         inputs.append(o)
         inputs_.append(o_)
@@ -155,10 +158,12 @@ class QMIX:
             inputs.append(torch.eye(self.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
             inputs_.append(torch.eye(self.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
 
-        # 要把obs中的三个拼起来，并且要把episode_num个episode、self.args.n_agents个agent的数据拼成40条(40,96)的数据，
+        # 把batch_size、n_agents个agent的obs拼起来，
         # 因为这里所有agent共享一个神经网络，每条数据中带上了自己的编号，所以还是自己的数据
+        # (batch_size, n_agents, n_actions) -> (batch_size*n_agents, n_actions)
         inputs = torch.cat([x.reshape(episode_num*self.n_agents, -1) for x in inputs], dim=1)
         inputs_ = torch.cat([x.reshape(episode_num*self.n_agents, -1) for x in inputs_], dim=1)
+
         return inputs, inputs_
 
     def init_hidden(self, episode_num):
@@ -173,19 +178,3 @@ class QMIX:
         torch.save(self.eval_drqn_net.state_dict(), self.model_dir+'/'+num+'_drqn_net_params.pkl')
         torch.save(self.eval_qmix_net.state_dict(), self.model_dir+'/'+num+'_qmix_net_params.pkl')
 
-
-if __name__ == "__main__":
-    from config import Config
-    from smac.env import StarCraft2Env
-    conf = Config()
-    env = StarCraft2Env(
-            map_name=conf.map_name,
-            step_mul=conf.step_mul,
-            difficulty=conf.difficulty,
-            game_version=conf.game_version,
-            replay_dir=conf.replay_dir
-        )
-    env_info = env.get_env_info()
-    conf.set_env_info(env_info)
-
-    policy = QMIX(conf)
