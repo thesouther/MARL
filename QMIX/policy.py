@@ -93,7 +93,7 @@ class QMIX:
         q_total_eval = self.eval_qmix_net(q_evals, s)
         q_total_target = self.target_qmix_net(q_targets, s_)
 
-        targets = r + self.conf.gamma * q_total_target * (1-terminated)
+        targets = r + self.conf.gamma * q_total_target *    (1-terminated)
 
         td_error = (q_total_eval - targets.detach())
         mask_td_error = mask * td_error
