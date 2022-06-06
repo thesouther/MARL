@@ -107,7 +107,7 @@ class QMIX:
 
         if train_step > 0 and train_step % self.conf.update_target_params == 0:
             self.target_drqn_net.load_state_dict(self.eval_drqn_net.state_dict())
-            self.target_qmix_net.load_state_dict(self.target_qmix_net.state_dict())
+            self.target_qmix_net.load_state_dict(self.eval_qmix_net.state_dict())
 
     def get_q_values(self, batch, max_episode_len):
         episode_num = batch['o'].shape[0]
